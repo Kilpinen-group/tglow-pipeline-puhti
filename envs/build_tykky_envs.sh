@@ -13,20 +13,27 @@ CPR_ENV=/projappl/project_2018108/cellprofiler-env
 
 module load tykky
 
-# Remove any partial/empty installs from previous interrupted runs
-[ -d "$TGLOW_ENV" ] && [ -z "$(ls -A "$TGLOW_ENV")" ] && rmdir "$TGLOW_ENV"
-[ -d "$CPR_ENV"   ] && [ -z "$(ls -A "$CPR_ENV")"   ] && rmdir "$CPR_ENV"
+build_env() {
+    local label="$1"; local prefix="$2"; shift 2
+    if [ -d "$prefix" ] && [ -n "$(ls -A "$prefix")" ]; then
+        echo "=== $label: already built at $prefix — skipping ==="
+        return
+    fi
+    # Remove empty dir left by a previously interrupted build
+    [ -d "$prefix" ] && rmdir "$prefix"
+    echo "=== Building $label ==="
+    conda-containerize new --mamba "$@" --prefix "$prefix"
+}
 
-echo "=== Building tglow environment (Python 3.10) ==="
-conda-containerize new --mamba \
+build_env "tglow environment (Python 3.10)" "$TGLOW_ENV" \
     -r "$ENVS_DIR/req_tglow.txt" \
-    --prefix "$TGLOW_ENV" \
     "$ENVS_DIR/env_tglow.yml"
 
-echo "=== Building cellprofiler environment (Python 3.9) ==="
-conda-containerize new --mamba \
-    -r "$ENVS_DIR/req_cellprofiler.txt" \
-    --prefix "$CPR_ENV" \
+# Note: pip runs via --post-install (not -r) so the conda env is active when pip
+# installs cellprofiler. This ensures pip sees conda-installed wxpython as already
+# satisfied and can find mysql_config / java from conda on PATH.
+build_env "cellprofiler environment (Python 3.9)" "$CPR_ENV" \
+    --post-install "$ENVS_DIR/post_install_cellprofiler.sh" \
     "$ENVS_DIR/env_cellprofiler.yml"
 
 echo "=== Verifying installs ==="

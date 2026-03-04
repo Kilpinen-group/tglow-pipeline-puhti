@@ -3,6 +3,9 @@ channels:
   - defaults
 dependencies:
   - python=3.9.19
-  - wxpython
-  - mysql        # provides mysql_config headers needed to compile mysqlclient==1.4.6
+  - wxpython              # binary; stub wheel registers it with pip
+  - numpy>=1.26,<2        # >=1.26.4 for tglow-core; <2.0 because python-javabridge uses old numpy C API
+  - cython                # binary; needed for centrosome compilation (--no-build-isolation)
+  - mysql                 # provides mysql_config for mysqlclient==1.4.6
+  - openjdk               # provides JAVA_HOME for python-javabridge
   - pip

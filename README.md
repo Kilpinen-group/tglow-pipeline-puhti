@@ -1,3 +1,203 @@
+# CSC Puhti setup
+
+> This section documents Puhti-specific installation. Generic upstream
+> installation instructions follow below.
+
+## Prerequisites
+
+- Access to CSC Puhti with a project account (e.g. `project_XXXXXXX`)
+- GPU partition access (required for cellpose segmentation and deconvolution)
+- Nextflow: `module load nextflow/25.10.2` (or the latest available version)
+
+## Directory layout
+
+We recommend the following layout, substituting your project number:
+
+```
+/projappl/project_XXXXXXX/
+├── tglow-pipeline/          # this repository
+├── tglow-env/               # Tykky env: Python 3.10 (tglow-core, cellpose, …)
+└── cellprofiler-env/        # Tykky env: Python 3.9 (cellprofiler 4.2.8)
+
+/scratch/project_XXXXXXX/
+└── my_run/
+    ├── pipeline_testdata/   # input data
+    ├── workdir/             # Nextflow work directory
+    └── results/             # pipeline outputs
+```
+
+## Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/<your-org>/tglow-pipeline.git \
+    /projappl/project_XXXXXXX/tglow-pipeline
+```
+
+### 2. Build the Tykky environments
+
+Puhti requires software to be containerized via
+[Tykky](https://docs.csc.fi/computing/containers/tykky/) rather than installed
+as plain conda environments (Lustre filesystem limitation). A build script is
+provided:
+
+```bash
+# Edit the paths at the top of the script to match your project number
+nano /projappl/project_XXXXXXX/tglow-pipeline/envs/build_tykky_envs.sh
+
+# Start an interactive compute session and run the script
+sinteractive --account project_XXXXXXX --time 1:30:00 --mem 16000 --tmp 100
+bash /projappl/project_XXXXXXX/tglow-pipeline/envs/build_tykky_envs.sh
+```
+
+This builds two environments sequentially (~60–90 min total):
+
+| Environment | Python | Key packages |
+|-------------|--------|--------------|
+| `tglow-env` | 3.10 | tglow-core, cellpose 3.0.8, clij2-fft, RedLionfish, h5py |
+| `cellprofiler-env` | 3.9 | cellprofiler 4.2.8, tglow-core |
+
+**Important — cellprofiler-env build notes:**
+
+`cellprofiler-env` uses `--post-install` (not `-r`) so the post-install script
+runs with the full conda environment active. The script (`envs/post_install_cellprofiler.sh`)
+does the following:
+
+1. **wxPython stub wheel.** `wxPython` has no pre-built Linux wheels on PyPI
+   and cannot be built from source inside the container (no GTK3 dev headers).
+   conda-forge provides a working binary. The post-install script creates a
+   zero-file stub `.whl` using Python's `zipfile` module (no setuptools needed)
+   and installs it with `--find-links` so the package manager sees wxPython as
+   already satisfied at the conda version. A constraint file pins it to that
+   exact version to prevent upgrades.
+
+2. **System tools for C-extension builds.** `mysql_config` (from conda `mysql`)
+   and `java` (from conda `openjdk`) must be on PATH when compiling `mysqlclient`
+   and `python-javabridge`. The `--no-build-isolation` flag ensures these conda
+   packages are visible during the build.
+
+3. **uv resolver.** `cellprofiler==4.2.8` has a dependency tree too complex for
+   pip's backtracking resolver (hits the depth limit). The post-install script
+   installs `uv` first and uses `uv pip install --system` instead, which uses a
+   SAT-based resolver without a depth limit.
+
+4. **Dependency overrides.** `cellprofiler==4.2.8` pins `scikit-image==0.18.3`
+   and requires `numpy<1.25`, but `tglow-core` needs `scikit-image>=0.20.0` and
+   `numpy>=1.26.4`. Following the approach in the
+   [upstream wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki/1-Installation),
+   cellprofiler works fine with newer versions at runtime; `uv --override` tells
+   the resolver to accept `scikit-image>=0.20.0` and `numpy>=1.26.4,<2.0`.
+   (numpy must stay below 2.0 because `python-javabridge 4.0.4` uses the old
+   numpy C API.)
+
+**Note:** The `tglow-core` package installs as the Python module `tglow`
+(i.e. `import tglow`, not `import tglow_core`).
+
+After the build completes, verify both environments:
+
+```bash
+# cellprofiler-env: check cellprofiler, tglow, and wx are importable
+/projappl/project_XXXXXXX/cellprofiler-env/bin/python -c "
+import cellprofiler, tglow, wx
+print('cellprofiler:', cellprofiler.__version__)
+print('tglow:        ok')
+print('wx:          ', wx.__version__)
+"
+
+# tglow-env
+/projappl/project_XXXXXXX/tglow-env/bin/python -c "import tglow; print('tglow: ok')"
+```
+
+A scipy UserWarning about numpy version on import is expected and harmless.
+
+### 3. Configure the Puhti profile
+
+The Puhti Nextflow profile is in `conf/puhti.config`. Before using it, update
+the two path variables at the top of the file to match your project:
+
+```groovy
+// conf/puhti.config
+TGLOW_ENV = '/projappl/project_XXXXXXX/tglow-env'
+CPR_ENV   = '/projappl/project_XXXXXXX/cellprofiler-env'
+```
+
+Also update the billing account in the `clusterOptions` lines:
+
+```groovy
+clusterOptions = '--account=project_XXXXXXX'
+// and for GPU processes:
+clusterOptions = '--account=project_XXXXXXX --gres=gpu:v100:1'
+```
+
+The profile maps tglow's internal resource labels to Puhti partitions:
+- CPU labels (`small`, `normal`, `himem`, `*_img`) → `small` partition
+- GPU labels (`gpu_*`) → `gpu` partition with one V100
+
+### 4. Register the profile in nextflow.config
+
+If it is not already present, add the Puhti profile inside the `profiles {}`
+block in `nextflow.config`:
+
+```groovy
+profiles {
+    // ... existing profiles ...
+    puhti { includeConfig 'conf/puhti.config' }
+}
+```
+
+## Running a pipeline
+
+### Slurm head-job script template
+
+Create a script like the following and submit it with `sbatch`:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=tglow
+#SBATCH --account=project_XXXXXXX
+#SBATCH --partition=small
+#SBATCH --time=12:00:00
+#SBATCH --mem=8G
+#SBATCH --cpus-per-task=2
+#SBATCH --output=/scratch/project_XXXXXXX/my_run/tglow_%j.log
+
+module load nextflow/25.10.2
+
+export NXF_HOME=/scratch/project_XXXXXXX/.nextflow
+
+# Run from the scripts directory so relative paths in your config resolve correctly
+cd /scratch/project_XXXXXXX/my_run/scripts
+
+nextflow run /projappl/project_XXXXXXX/tglow-pipeline/main.nf \
+  -profile puhti \
+  -c my_config.config \
+  -entry run_pipeline \
+  -w /scratch/project_XXXXXXX/my_run/workdir \
+  -with-report logs/run_pipeline.html \
+  -with-trace logs/run_pipeline.trace \
+  -resume
+```
+
+Use `-entry stage` instead of `-entry run_pipeline` if you first need to stage
+raw PerkinElmer instrument data.
+
+### Demo run
+
+A ready-to-use demo script is provided at
+`/scratch/project_XXXXXXX/tglow_example/run_tglow_demo.sh`. Download the demo
+data first:
+
+```bash
+mkdir -p /scratch/project_XXXXXXX/tglow_example
+cd /scratch/project_XXXXXXX/tglow_example
+wget https://ftp.ebi.ac.uk/pub/databases/biostudies/S-BSST/652/S-BSST2652/Files/TEST_DATA/pipeline_testdata_v1.zip
+unzip pipeline_testdata_v1.zip
+sbatch run_tglow_demo.sh
+```
+
+---
+
 # Tglow: Nextflow pipeline for analyzing HCI data
 
 > Check out our pre-print here: https://www.biorxiv.org/content/10.64898/2026.02.10.704860v1
