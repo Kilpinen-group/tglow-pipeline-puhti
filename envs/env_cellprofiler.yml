@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9.19
+  - wxpython
+  - mysql        # provides mysql_config headers needed to compile mysqlclient==1.4.6
+  - pip

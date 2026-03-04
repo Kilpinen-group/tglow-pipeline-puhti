@@ -1,0 +1,5 @@
+tglow-core
+clij2-fft
+RedLionfish
+cellpose==3.0.8
+h5py

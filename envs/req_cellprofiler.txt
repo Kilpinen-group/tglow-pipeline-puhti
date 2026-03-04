@@ -1,0 +1,2 @@
+tglow-core
+cellprofiler==4.2.8
