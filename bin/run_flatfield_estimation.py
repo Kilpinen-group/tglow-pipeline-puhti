@@ -24,6 +24,7 @@ from skimage.transform import downscale_local_mean, resize, resize_local_mean
 from numpy.polynomial import polynomial as P
 from sklearn.linear_model import RidgeCV
 from tglow.io.perkin_elmer_parser import PerkinElmerParser
+import _tglow_patches  # noqa: F401 — applies upstream bug fixes to PerkinElmerParser
 
 
 # Plot results from basicpy fit

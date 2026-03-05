@@ -20,73 +20,7 @@ import argparse
 from xml.etree import ElementTree as ET
 from tglow.io.perkin_elmer_parser import PerkinElmerParser
 from datetime import datetime
-
-# Upstream bug fix (tglow-core 0.1.2): parse_wells() crashes with KeyError when the
-# Wells section of the XML references image IDs that are absent from the Images section
-# (e.g. unacquired z-planes in best-focus acquisition mode).
-# Fix: skip image references whose ID is not in self.images.
-def _parse_wells_patched(self):
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    _log.info("[+] Reading Wells metadata")
-    self.wells = []
-    for well in self.xml.findall("./PE:Wells/PE:Well", self.NS):
-        w = {
-            "id":  well.find("./PE:id",  self.NS).text,
-            "row": int(well.find("./PE:Row", self.NS).text),
-            "col": int(well.find("./PE:Col", self.NS).text),
-            "images": [
-                self.images[wi.attrib["id"]]
-                for wi in well.findall("./PE:Image", self.NS)
-                if wi.attrib["id"] in self.images
-            ],
-        }
-        self.wells.append(w)
-    _log.info(f" └ Wells: {len(self.wells)}")
-
-PerkinElmerParser.parse_wells = _parse_wells_patched
-
-
-# Upstream bug fix (tglow-core 0.1.2): estimate_pixel_sizes() crashes when the
-# acquisition has only one z-plane (img1 stays None, then dereferenced unconditionally).
-# Fix: return None early when no second plane is present (2D / best-focus data).
-def _estimate_pixel_sizes_patched(self):
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    img0 = None
-    img1 = None
-    for img in self.wells[0]["images"]:
-        if img["plane"] == '1':
-            img0 = img
-        if img["plane"] == '2':
-            img1 = img
-            break
-    if img0 is None or img1 is None:
-        _log.warning("Could not estimate z resolution: fewer than 2 planes found")
-        zres = None
-    else:
-        zres = abs(img0["position"]["z"]["value"] - img1["position"]["z"]["value"])
-        zunit = img1["position"]["z"]["unit"]
-        if zunit == "m":
-            zres = zres * 1e6
-        else:
-            _log.warning(f"Could not estimate z resolution, invalid unit {zunit}")
-            zres = None
-    if self.channels is not None and len(self.channels) > 0:
-        yres = self.channels[0]["image_resolution"]["y"]["value"]
-        yunit = self.channels[0]["image_resolution"]["y"]["unit"]
-        yres = yres * 1e6 if yunit == "m" else None
-        xres = self.channels[0]["image_resolution"]["x"]["value"]
-        xunit = self.channels[0]["image_resolution"]["x"]["unit"]
-        xres = xres * 1e6 if xunit == "m" else None
-    else:
-        yres = None
-        xres = None
-    if zres is not None and yres is not None and xres is not None:
-        return [zres, yres, xres]
-    return None
-
-PerkinElmerParser.estimate_pixel_sizes = _estimate_pixel_sizes_patched
+import _tglow_patches  # noqa: F401 — applies upstream bug fixes to PerkinElmerParser
 import dateutil
 #from tglow.io.image_query import ImageQuery
 

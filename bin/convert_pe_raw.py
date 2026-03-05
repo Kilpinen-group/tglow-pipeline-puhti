@@ -2,10 +2,11 @@
 
 import os
 import logging
+import _tglow_patches  # noqa: F401 — applies upstream bug fixes to PerkinElmerParser
 from tglow.io.image_query import ImageQuery
 import tglow.io.tglow_io as tglow_io
 import argparse
-from aicsimageio.types import PhysicalPixelSizes    
+from aicsimageio.types import PhysicalPixelSizes
 
 
 # Setup logging
