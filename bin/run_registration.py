@@ -207,7 +207,7 @@ class Registration:
             elif self.mode == "CROSS":
                 align_mat = np.eye(3, dtype=np.float64)
                 #offset, _, _ = phase_cross_correlation(ref_stack, qry_stack_in, reference_mask=ref_mask, return_error='always')
-                offset, _, _ = phase_cross_correlation(ref_stack, qry_stack_in, reference_mask=ref_mask, moving_mask=qry_mask, return_error='always')
+                offset, _, _ = phase_cross_correlation(ref_stack, qry_stack_in, reference_mask=ref_mask, moving_mask=qry_mask)
                 # Offsets are inverted compared to stackreg
                 align_mat[0,2] = -offset[1]
                 align_mat[1,2] = -offset[0]                                    
