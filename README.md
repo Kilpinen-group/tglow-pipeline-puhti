@@ -1,7 +1,6 @@
-# CSC Puhti setup
+# CSC Puhti setup for tglow-pipeline
 
-> This section documents Puhti-specific installation. Generic upstream
-> installation instructions follow below.
+> This section documents Puhti-specific installation of the [tglow-pipeline](https://github.com/TrynkaLab/tglow-pipeline) developed by the Trynka lab. We refer to the TrynkaLab tglow-pipeline [wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki) for full instructions on how to install, stage, configure and run the tglow-pipeline.
 
 ## Prerequisites
 
@@ -85,7 +84,7 @@ does the following:
 4. **Dependency overrides.** `cellprofiler==4.2.8` pins `scikit-image==0.18.3`
    and requires `numpy<1.25`, but `tglow-core` needs `scikit-image>=0.20.0` and
    `numpy>=1.26.4`. Following the approach in the
-   [upstream wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki/1-Installation),
+   [tglow wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki/1-Installation),
    cellprofiler works fine with newer versions at runtime; `uv --override` tells
    the resolver to accept `scikit-image>=0.20.0` and `numpy>=1.26.4,<2.0`.
    (numpy must stay below 2.0 because `python-javabridge 4.0.4` uses the old
