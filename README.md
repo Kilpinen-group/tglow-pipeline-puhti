@@ -1,7 +1,6 @@
-# CSC Puhti setup
+# CSC Puhti setup for tglow-pipeline
 
-> This section documents Puhti-specific installation. Generic upstream
-> installation instructions follow below.
+> This section documents Puhti-specific installation of the [tglow-pipeline](https://github.com/TrynkaLab/tglow-pipeline) developed by the Trynka lab. We refer to the TrynkaLab tglow-pipeline [wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki) for full instructions on how to install, stage, configure and run the tglow-pipeline.
 
 ## Prerequisites
 
