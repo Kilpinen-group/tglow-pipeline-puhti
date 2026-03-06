@@ -78,7 +78,7 @@ workflow estimate_scaling_factors {
             demultiplex_channelstring = scaling_in.map{row -> row[1]}.collect().map({it.unique().join(" ")})
 
             // Start running only if all the plate offsets have been calculated
-            scaling_channel = calculate_scaling_factors(cellpose_in.last(),
+            scaling_channel = calculate_scaling_factors(cellpose_out.last(),
                 blacklist_file,
                 plates,
                 manifest_registration_file,
