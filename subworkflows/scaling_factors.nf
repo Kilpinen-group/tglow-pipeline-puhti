@@ -59,13 +59,13 @@ workflow estimate_scaling_factors {
                 scaling_in = scaling_in.combine(manifest_registration, by: 0).map{row -> tuple(row[0], row[1], row[4].split(',').join(" "))}
             }
             
-            if (rn_control_list) {
+            if (params.rn_control_list) {
                 // Start only if registration & cellpose is done
                 control_dir = calculate_plate_offsets(
                     cellpose_out.last(), // ensures this only starts when cellpose is done
                     scaling_in,
-                    Channel.value(file("${rn_publish_dir}/registration")),
-                    Channel.value(file("${rn_publish_dir}/masks")),
+                    Channel.value(file("${params.rn_publish_dir}/registration")),
+                    Channel.value(file("${params.rn_publish_dir}/masks")),
                     flatfield_out,
                     blacklist_file,
                     control_file
