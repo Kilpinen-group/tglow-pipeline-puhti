@@ -49,8 +49,8 @@ workflow estimate_scaling_factors {
         if (rn_autoscale) {
             // Channel <plate> <mask_channel1 mask_channel2 mask_channelN>
             scaling_in = manifest.map{
-                row -> tuple(row[0],
-                (row[8][0] == "none") ? "none" : row[8].collect{it -> (row[0] + "=" + (it.toInteger() -1).toString())}.join(" "),
+                row -> tuple(row.plate,
+                (row.mask_channels == "none") ? "none" : row.mask_channels.collect{it -> (row.plate + "=" + it.toString())}.join(" "),
                 null)
             }
             
