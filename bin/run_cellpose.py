@@ -128,8 +128,12 @@ class CellposeRunner():
             if meta.physical_pixel_sizes is not None:
                 px = meta.physical_pixel_sizes
                 log.info(f"Pixel sizes from ome {px}")
-                self.anisotropy = px[0] / px[1]
-                log.info(f"Estimated anisotropy {self.anisotropy}")
+                if px[0] is not None and px[1] is not None and px[1] != 0:
+                    self.anisotropy = px[0] / px[1]
+                    log.info(f"Estimated anisotropy {self.anisotropy}")
+                else:
+                    self.anisotropy = 1.0
+                    log.warning("Physical pixel sizes incomplete or missing Z/Y values; defaulting anisotropy to 1.0")
             else:
                 log.error("Must provide --anisotropy when running in 3d or ome metadata must contain PhysicalPixelSizes")
                 raise TypeError("Must provide --anisotropy when running in 3d or ome metadata must contain PhysicalPixelSizes")
