@@ -147,34 +147,93 @@ profiles {
 
 ## Running a pipeline
 
-### Slurm head-job script template
+### Slurm head-job script
 
-Create a script like the following and submit it with `sbatch`:
+We recommend organising each experiment as follows, then submitting with
+`sbatch run_<experiment>.sh`:
+
+```
+/scratch/project_XXXXXXX/my_experiment/
+├── workdir/              # Nextflow work directory (-w flag)
+├── results/              # pipeline outputs (rn_publish_dir / rn_image_dir)
+├── data/                 # raw instrument data (stage entry only)
+└── scripts/
+    ├── logs/             # Nextflow logs, HTML reports, trace files
+    └── inputs/
+        ├── manifest.tsv          # plate/well/field manifest
+        ├── control_list.tsv      # control wells for rn_autoscale (if used)
+        └── my_experiment.config  # per-run Nextflow params
+```
+
+The run script below is self-documenting — edit the `UPDATE FOR EACH RUN`
+sections and leave the rest unchanged:
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=tglow
+
+# ===========================================================================
+# tglow-pipeline run script for CSC Puhti
+#
+# To start a new run:
+#   1. Copy this script and the scripts/ directory to your experiment folder
+#   2. Edit the "UPDATE FOR EACH RUN" sections below
+#   3. Edit inputs/my_experiment.config (manifests, output dirs, pipeline params)
+#   4. Submit: sbatch run_my_experiment.sh
+# ===========================================================================
+
+# --- UPDATE FOR EACH RUN: Slurm job identity ---
+#SBATCH --job-name=my_experiment
 #SBATCH --account=project_XXXXXXX
+#SBATCH --output=/scratch/project_XXXXXXX/my_experiment/scripts/logs/my_experiment_%j.log
+# ------------------------------------------------
+
+# Fixed Slurm settings (head job only — child jobs are submitted by Nextflow)
 #SBATCH --partition=small
 #SBATCH --time=12:00:00
 #SBATCH --mem=8G
-#SBATCH --cpus-per-task=2
-#SBATCH --output=/scratch/project_XXXXXXX/my_run/tglow_%j.log
+#SBATCH --cpus-per-task=1
+#SBATCH --mail-type=BEGIN,FAIL,END
+
+# ===========================================================================
+# UPDATE FOR EACH RUN
+# ===========================================================================
+
+# Pipeline entry point: "stage" (raw → OME-TIFF) or "run_pipeline" (process staged images)
+ENTRY="run_pipeline"
+
+# Short name for this run — used in report/trace filenames
+RUN_NAME="my_experiment_run"
+
+# Directory containing inputs/ and logs/ for this run.
+# Nextflow is launched from here so relative paths in CONFIG resolve correctly.
+SCRIPTS_DIR="/scratch/project_XXXXXXX/my_experiment/scripts"
+
+# Per-run Nextflow config: manifests, output dirs, and pipeline parameters.
+CONFIG="${SCRIPTS_DIR}/inputs/my_experiment.config"
+
+# Nextflow work directory for intermediate files.
+# Shared across runs when using -resume; use a separate dir to start fresh.
+WORKDIR="/scratch/project_XXXXXXX/my_experiment/workdir"
+
+# ===========================================================================
+
+# Pipeline settings (update if pipeline installed in a different location)
+PIPELINE="/projappl/project_XXXXXXX/tglow-pipeline/main.nf"
 
 module load nextflow/25.10.2
 
 export NXF_HOME=/scratch/project_XXXXXXX/.nextflow
 
-# Run from the scripts directory so relative paths in your config resolve correctly
-cd /scratch/project_XXXXXXX/my_run/scripts
+mkdir -p "${SCRIPTS_DIR}/logs"
+cd "${SCRIPTS_DIR}"
 
-nextflow run /projappl/project_XXXXXXX/tglow-pipeline/main.nf \
+nextflow run "${PIPELINE}" \
   -profile puhti \
-  -c my_config.config \
-  -entry run_pipeline \
-  -w /scratch/project_XXXXXXX/my_run/workdir \
-  -with-report logs/run_pipeline.html \
-  -with-trace logs/run_pipeline.trace \
+  -c "${CONFIG}" \
+  -entry "${ENTRY}" \
+  -w "${WORKDIR}" \
+  -with-report "logs/${RUN_NAME}.nextflow.html" \
+  -with-trace "logs/${RUN_NAME}.nextflow.trace" \
   -resume
 ```
 
@@ -195,154 +254,95 @@ unzip pipeline_testdata_v1.zip
 sbatch run_tglow_demo.sh
 ```
 
+## Puhti-specific notes and known issues
+
+### Local scratch (`rn_scratch`)
+
+**Do not use `rn_scratch = true` without also requesting NVMe storage from
+SLURM.** The `finalize` and `cellprofiler` processes write large temporary
+files (several GB per well), and without an explicit `--gres=nvme:N` allocation
+the compute node only has a small default `/tmp`, which fills up immediately.
+
+The safest option for most runs is:
+
+```groovy
+// in your experiment .config
+rn_scratch = false   // write directly to Lustre scratch
+```
+
+If you want to use local NVMe for performance, add the required SLURM flag to
+the relevant process labels in `conf/puhti.config`:
+
+```groovy
+withLabel: normal { clusterOptions = '--account=project_XXXXXXX --gres=nvme:50' }
+```
+
+and set `rn_scratch = true` in your run config.
+
+### scikit-image API compatibility (`selem` → `footprint`)
+
+CellProfiler 4.2.8 uses the old scikit-image `selem` keyword argument in its
+`MeasureGranularity` module, which was renamed to `footprint` in
+scikit-image ≥ 0.20. Since `tglow-core` requires scikit-image ≥ 0.20, the two
+packages conflict at runtime.
+
+**Workaround:** replace the `cellprofiler` entry-point symlink in
+`cellprofiler-env/_bin/` with a small Python wrapper that monkey-patches
+`skimage.morphology` before launching CellProfiler:
+
+```bash
+# Run once after building the cellprofiler-env
+rm /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
+```
+
+Then create `/projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler`
+with the following content (note: the shebang is valid only inside the
+Singularity container that Tykky creates; save with **LF line endings**):
+
+```python
+#!/PUHTI_TYKKY_SYR94yI/miniforge/envs/env1/bin/python3
+import sys, skimage.morphology
+
+_orig_erosion = skimage.morphology.erosion
+def _erosion(image, footprint=None, selem=None, **kwargs):
+    if selem is not None and footprint is None:
+        footprint = selem
+    return _orig_erosion(image, footprint=footprint, **kwargs)
+skimage.morphology.erosion = _erosion
+
+_orig_dilation = skimage.morphology.dilation
+def _dilation(image, footprint=None, selem=None, **kwargs):
+    if selem is not None and footprint is None:
+        footprint = selem
+    return _orig_dilation(image, footprint=footprint, **kwargs)
+skimage.morphology.dilation = _dilation
+
+_orig_reconstruction = skimage.morphology.reconstruction
+def _reconstruction(seed, mask, method='dilation', footprint=None, selem=None, offset=None):
+    if selem is not None and footprint is None:
+        footprint = selem
+    return _orig_reconstruction(seed, mask, method=method, footprint=footprint, offset=offset)
+skimage.morphology.reconstruction = _reconstruction
+
+from cellprofiler.__main__ import main
+sys.exit(main())
+```
+
+```bash
+chmod +x /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
+# Verify no CRLF line endings (critical — CRLF causes "bad interpreter" error):
+file /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
+# Should print: "Python script, ASCII text executable"
+```
+
+**Why `_bin/` and not `bin/`?** Tykky bind-mounts `_bin/` over `bin/` inside
+the Singularity container (`common.sh` line 54), so scripts placed in `_bin/`
+are what actually runs. The `_bin/` symlinks point to
+`/PUHTI_TYKKY_SYR94yI/miniforge/...` which resolves to the squashfs only
+inside the container.
+
 ---
 
-# Tglow: Nextflow pipeline for analyzing HCI data
-
-> Check out our pre-print here: https://www.biorxiv.org/content/10.64898/2026.02.10.704860v1
-
-This repo contains the nextflow pipeline and binaries and scripts to run a tglow-pipeline instance for the analysis of high content imaging data.
-A detailed walkthrough of the steps, installation and configuration is given on the [wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki) and a full list of options can be found in [docs/parameters.md](docs/parameters.md). A guided tutorial with example data is available [here](https://github.com/TrynkaLab/tglow-pipeline/wiki/7-Guided-example)
-
-There are three components to the overall workflow
-1. [tglow-pipeline](https://github.com/TrynkaLab/tglow-pipeline) - Nextflow files and Python scripts for running pipeline processes
-2. [tglow-core](https://github.com/TrynkaLab/tglow-core) - A python library with IO, parsing and convenience functions based on AICSImageIO.
-3. [tglow-r](https://github.com/TrynkaLab/tglow-r) - A Seurat-like R package for analyzing the output HCI features 
-
-
-# Installation & dependencies
-See [here](https://github.com/TrynkaLab/tglow-pipeline/wiki/1-Installation) for full install instructions of all pipeline components.
-
-# Pipeline overview
-
-The following readme gives a high level overview, for more detailed guide please see the wiki. The pipeline consists of two main stages:
-- stage: prepare and standardize raw images into a well/field-organized OME-TIFF layout with metadata.
-- run_pipeline: perform image processing and feature extraction on the staged images.
-
-Both stages are implemented as Nextflow workflows and can be run independently using `-entry stage|run_pipeline`. 
-
-<img src="docs/workflow.png" style="width:50%; height:auto;">
-
-
-> Some steps in the pipeline require GPU's to be available. These are semgmentation and deconvolution. Deconvolution will not run without GPU. Segmentation (CellPose) will run, but we only reccomend this in cases where you are generating masks in 2D. In 3d the computational burden for large datasets will be too much for CPU. 
-
-> The pipeline is intended to run on high performance compute (HPC) clusters, and bundled resource profiles should work for most HPC, but some tweaks to queue names and GPU settings may be required as flags differ between vendors and HPC configurations. Go to conf/processes.config and search for `queue` and `clusterOptions` to update. Furthermore each HPC is different, with different machines and resource limits. You may need to add a profile for your HPC enviroment in the conf folder. The nf-core config directory may be of help for your HPC: https://nf-co.re/configs/. If something is unclear, feel free to raise an issue on github.  
-
-> If you dont want to run the pipeline on HPC but run it locally, supply `-profile local`.
-
-## 1) stage
-Purpose: Stage Revity/PerkinElmer (currently Phenix or Operetta) acquisitions into a reproducible plate/row/col/field.ome.tiff structure and capture metadata (channel names, pixel sizes, channel order, original index files).
-
--> If you don't have a Phenix or Operetta export, you can skip this step, but will need to organize the images using your own script. See more details [here](https://github.com/TrynkaLab/tglow-pipeline/wiki/3-Staging-data)
-
-Input:
-- PerkinElmer index.xml / index.idx.xml and raw instrument files (or manually organized raw files).
-
-Output:
-- plate_name/row/col/field.ome.tiff (with metadata)
-- manifest listing wells to process (used as a Nextflow channel)
-- auxiliary files to capture provenance (index.xml, channel maps, etc.) (optional)
-
-Nextflow processes:
-1. prepare_manifest — create a manifest with wells/fields to run (re-usable Nextflow channel)
-2. fetch_raw — read raw files and write standardized OME-TIFFs and metadata
-
-## 2) run_pipeline
-Purpose: Run the core image-processing and feature-extraction steps on the staged images. The workflow is modular — many steps are optional or configurable.
-
-Input:
-- Staged OME-TIFFs (from `stage`) and optional per-plate/field metadata (flatfields, registration references, etc.)
-
-Output:
-- Segmentation outputs, registration matrices, flatfields, extracted feature tables, and logs/artifacts needed for downstream analysis.
-
-Main processing steps (in typical execution order — each step can be enabled/disabled via config):
-1. estimate flatfield (Polynomial / BaSiCPY) (optional)
-   - Parallelization: per-plate + channel or single flatfield for all plates + channels.
-   - Output: flatfield images only (no transformed images saved).
-2. register (cross correlation / pystackreg) (optional)
-   - Parallelization: per-well
-   - Output: registration matrices (no transformed images saved).
-3. cellpose segmentation
-   - Parallelization: per-well, GPU-enabled
-   - Notes: If registration is used, segmentation currently runs on the reference plate. Nucleus channel optional but segmentation is required.
-   - Output: 2D or 3D cell & nucleus masks as tiffs
-4. deconvolute with CLIJ2-fft (optional)
-   - Parallelization: per-well, GPU-enabled
-   - Output: deconvolved images (creates a data copy)
-5. finalizing images
-   - Parallelization: per-well
-   - Applies all the registration, flatfields, scaling, max projection to the (deconvolved) images and collects the masks
-   - Output: Analysis reade OME-TIFFs
-6. feature extraction with CellProfiler
-   - Parallelization: per-well
-   - Stage images into a CellProfiler-compatible layout, apply flatfields and registration (if enabled), and run feature extraction.
-   - Outputs: CellProfiler artifacts as a zip archive per well
-7. cellcrops (optional)
-   - Parallelization: per-well
-   - Produces a HDF5 file for each field where each h5 group is a cell
-   - Outputs: h5 file with fully processed cellcrops   
-
-# Options
-See nextflow.config or the [docs/parameters.md](docs/parameters.md) for available options and their descriptions.
-
-# Quick Usage
-
-Prerequisites:
-- Nextflow and conda
-- Completed [install instructions](https://github.com/TrynkaLab/tglow-pipeline/wiki/1_installation)
-
-I strongly reccomend to configure through a configuration file, altough parameters can be overridden on the commandline. I would reccomend a project structure as follows:
-
-- my_project
-  - results: By default this is where the pipeline stores outputs
-  - scripts
-    - logs
-    - my_config.config
-    - run_pipeline.sh
-  - workdir: By default this is the Nextflow workdir
-
-Quick examples:
-
-Stage PerkinElmer data from a raw export:
-```
-nextflow \
--log logs/stage.nextflow.log \
-run </path/to/main.nf> \
--profile <your profile> \
--w ../workdir \
--resume \
--entry stage \
--with-report logs/stage.nextflow.html \
--with-trace logs/stage.nextflow.trace \
--c my_config.config"
-```
-
-Run the main pipeline on staged images:
-```
-nextflow \
--log logs/run_pipeline.nextflow.log \
-run </path/to/main.nf> \
--profile <your profile> \
--w ../workdir \
--resume \
--entry run_pipeline \
--with-report logs/run_pipeline.nextflow.html \
--with-trace logs/run_pipeline.nextflow.trace \
--c my_config.config"
-```
-
-# Getting help
-See [known issues and notes](https://github.com/TrynkaLab/tglow-pipeline/wiki/Kown-issues). If you find an issue please raise it on the git or contact us directly.
-
-# Authors:
-- Olivier Bakker
-- Francesco Cisterno
-
-# References
-- https://github.com/clij/clij2-fft
-- https://cellprofiler.org/
-- https://scikit-image.org/
-- https://github.com/MouseLand/cellpose
-- https://github.com/glichtner/pystackreg/tree/master
-- https://basicpy.readthedocs.io/en/latest/
+For full documentation on pipeline configuration, parameters, and usage see the
+[tglow-pipeline wiki](https://github.com/TrynkaLab/tglow-pipeline/wiki) and the
+[pre-print](https://www.biorxiv.org/content/10.64898/2026.02.10.704860v1).
