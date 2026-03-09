@@ -64,7 +64,7 @@ workflow estimate_scaling_factors {
                 control_dir = calculate_plate_offsets(
                     cellpose_out.last(), // ensures this only starts when cellpose is done
                     scaling_in,
-                    Channel.value(file("${params.rn_publish_dir}/registration")),
+                    (rn_manifest_registration != null) ? Channel.value(file("${params.rn_publish_dir}/registration")) : Channel.value(file("NO_REGISTRATION")),
                     Channel.value(file("${params.rn_publish_dir}/masks")),
                     flatfield_out,
                     blacklist_file,
