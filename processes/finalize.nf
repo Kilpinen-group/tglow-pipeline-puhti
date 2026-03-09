@@ -55,7 +55,7 @@ process finalize {
             cmd += " --plate_merge " + merge_plates.join(" ")
         }
         
-        if (registration.fileName.name != "NO_REGISTRATION") {
+        if (params.rn_manifest_registration) {
             cmd += " --registration_dir ./registration"
         }
                 

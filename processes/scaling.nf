@@ -47,7 +47,7 @@ process calculate_scaling_factors {
             cmd += " --blacklist $blacklist"
         }
         
-        if (control_dir.fileName.name != "NO_CONTROL_DIR") {
+        if (params.rn_control_list) {
              cmd += " --control_dir control_intensities"
         }
         
@@ -130,7 +130,7 @@ process calculate_plate_offsets {
             cmd += " --plate_merge " + merge_plates
         }
         
-        if (registration.fileName.name != "NO_REGISTRATION") {
+        if (params.rn_manifest_registration) {
             cmd += " --registration_dir ./registration"
         }
                 
