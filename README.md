@@ -279,58 +279,18 @@ withLabel: normal { clusterOptions = '--account=project_XXXXXXX --gres=nvme:50' 
 
 and set `rn_scratch = true` in your run config.
 
-### scikit-image API compatibility (`selem` → `footprint`)
+### CellProfiler wrapper (`puhti/cellprofiler-wrapper`)
 
-CellProfiler 4.2.8 uses the old scikit-image `selem` keyword argument in its
-`MeasureGranularity` module, which was renamed to `footprint` in
-scikit-image ≥ 0.20. Since `tglow-core` requires scikit-image ≥ 0.20, the two
-packages conflict at runtime.
-
-**Workaround:** replace the `cellprofiler` entry-point symlink in
-`cellprofiler-env/_bin/` with a small Python wrapper that monkey-patches
-`skimage.morphology` before launching CellProfiler:
+Several CellProfiler 4.2.8 runtime issues require a wrapper script to be
+deployed in place of the default `cellprofiler` entry point. The wrapper is
+kept in `puhti/cellprofiler-wrapper` in this repository. Deploy it once after
+building `cellprofiler-env`:
 
 ```bash
-# Run once after building the cellprofiler-env
-rm /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
-```
-
-Then create `/projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler`
-with the following content (note: the shebang is valid only inside the
-Singularity container that Tykky creates; save with **LF line endings**):
-
-```python
-#!/PUHTI_TYKKY_SYR94yI/miniforge/envs/env1/bin/python3
-import sys, skimage.morphology
-
-_orig_erosion = skimage.morphology.erosion
-def _erosion(image, footprint=None, selem=None, **kwargs):
-    if selem is not None and footprint is None:
-        footprint = selem
-    return _orig_erosion(image, footprint=footprint, **kwargs)
-skimage.morphology.erosion = _erosion
-
-_orig_dilation = skimage.morphology.dilation
-def _dilation(image, footprint=None, selem=None, **kwargs):
-    if selem is not None and footprint is None:
-        footprint = selem
-    return _orig_dilation(image, footprint=footprint, **kwargs)
-skimage.morphology.dilation = _dilation
-
-_orig_reconstruction = skimage.morphology.reconstruction
-def _reconstruction(seed, mask, method='dilation', footprint=None, selem=None, offset=None):
-    if selem is not None and footprint is None:
-        footprint = selem
-    return _orig_reconstruction(seed, mask, method=method, footprint=footprint, offset=offset)
-skimage.morphology.reconstruction = _reconstruction
-
-from cellprofiler.__main__ import main
-sys.exit(main())
-```
-
-```bash
+cp /projappl/project_XXXXXXX/tglow-pipeline/puhti/cellprofiler-wrapper \
+   /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
 chmod +x /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
-# Verify no CRLF line endings (critical — CRLF causes "bad interpreter" error):
+# Verify LF line endings (CRLF causes "bad interpreter" error):
 file /projappl/project_XXXXXXX/cellprofiler-env/_bin/cellprofiler
 # Should print: "Python script, ASCII text executable"
 ```
@@ -340,6 +300,33 @@ the Singularity container (`common.sh` line 54), so scripts placed in `_bin/`
 are what actually runs. The `_bin/` symlinks point to
 `/PUHTI_TYKKY_SYR94yI/miniforge/...` which resolves to the squashfs only
 inside the container.
+
+The wrapper applies the following patches at import time:
+
+**1. `selem` → `footprint` (scikit-image ≥ 0.20 API break)**
+
+CellProfiler 4.2.8 uses the old scikit-image `selem` keyword argument in its
+`MeasureGranularity` module, which was renamed to `footprint` in
+scikit-image ≥ 0.20. Since `tglow-core` requires scikit-image ≥ 0.20, the two
+packages conflict at runtime. The wrapper monkey-patches
+`skimage.morphology.erosion`, `dilation`, and `reconstruction` to accept both
+keyword names.
+
+**2. `MeasureObjectIntensityDistribution` empty-objects crash**
+
+CellProfiler 4.x crashes with `IndexError: index 0 is out of bounds for axis 1
+with size 0` in `MeasureObjectIntensityDistribution.run()` when a field
+contains zero identified objects. The wrapper catches this error and logs a
+warning, allowing the pipeline to continue.
+
+**3. JVM SIGSEGV on shutdown (exit 134)**
+
+CellProfiler uses `javabridge` to interface with Bio-Formats (Java). On
+shutdown, javabridge's `atexit` handler attempts to destroy the JVM, which
+crashes with a SIGSEGV on Puhti (exit code 134/SIGABRT). This happens
+reproducibly after all images are processed and all output is already flushed.
+The wrapper uses `os._exit()` instead of `sys.exit()` to terminate the process
+immediately after `main()` returns, bypassing the atexit cleanup.
 
 ---
 
