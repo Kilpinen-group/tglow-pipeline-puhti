@@ -55,8 +55,9 @@ class ScalingCalculator():
     
     
     def __init__(self, path, pattern, output, path_control=None, pattern_control=None, plate=None, blacklist=None, plate_groups=None, mask_channels=None):
-        
+
         self.output=output
+        self.path=path
 
         if mask_channels is not None:
             self.mask_channels = {}
@@ -137,12 +138,20 @@ class ScalingCalculator():
         
     def read_intensity_files(self):
         log.info("Reading intensity files")
-        
+
         # Read per well intensity CSV files
         for file in self.files:
             #log.debug(f"Reading: {file}")
             cur_df = pd.read_csv(file, sep="\t")
-            
+
+            # Override plate column with the directory name to handle cases where
+            # the plate ID embedded in the OME-TIFF metadata differs from the
+            # directory name used by the pipeline (e.g. microscope acquisition IDs).
+            plate_dir = os.path.relpath(file, self.path).split(os.sep)[0]
+            if cur_df['plate'].iloc[0] != plate_dir:
+                log.warning(f"Plate name mismatch in {file}: '{cur_df['plate'].iloc[0]}' -> '{plate_dir}'")
+                cur_df['plate'] = plate_dir
+
             if self.main_df is not None:
                 self.main_df = pd.concat((self.main_df, cur_df))
             else:
