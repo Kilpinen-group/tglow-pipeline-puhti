@@ -37,6 +37,8 @@ class MaskedControlIntensityCalculator():
                                                registration_dir=registration_dir,
                                                flatfields=flatfields,
                                                scaling_factors=None,
+                                               scaling_slope=None,
+                                               scaling_bias=None,
                                                mask_channels=mask_channels,
                                                mask_dir=mask_dir,
                                                mask_pattern=mask_pattern,
