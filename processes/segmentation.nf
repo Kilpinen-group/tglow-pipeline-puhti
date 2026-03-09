@@ -65,7 +65,7 @@ process cellpose {
             cmd += " --nucl_prob_threshold ${params.cp_nucl_prob_threshold}"
         }
         
-        if (params.rn_max_project & !params.rn_hybrid) {
+        if (params.rn_max_project || params.rn_hybrid) {
             cmd += " --no_3d"
         }
         
