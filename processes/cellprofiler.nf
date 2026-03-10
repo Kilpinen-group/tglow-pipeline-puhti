@@ -27,6 +27,7 @@ process finalize_and_cellprofiler {
         // Stage the masks
         cmd =
         """
+        export TMPDIR=\$(pwd)
         mkdir -p ./masks/${well.relpath}
         ln -s \$(pwd)/cell_masks/*  ./masks/${well.relpath}/
         """
@@ -171,8 +172,9 @@ process cellprofiler {
     script:
     
         // Outputs the cp files into ./images
-        cmd = 
+        cmd =
         """
+        export TMPDIR=\$(pwd)
         mkdir -p images/${well.relpath}
         ln -s \$(pwd)/input_images/* images/${well.relpath}/
         
