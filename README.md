@@ -279,6 +279,57 @@ withLabel: normal { clusterOptions = '--account=project_XXXXXXX --gres=nvme:50' 
 
 and set `rn_scratch = true` in your run config.
 
+### CellProfiler TMPDIR fix
+
+CellProfiler writes a large HDF5 measurements file to the system temporary
+directory during the run. Without NVMe allocation, the compute node's `/tmp`
+partition is only a few MB, causing `OSError: No space left on device` mid-run.
+The fix is applied in `processes/cellprofiler.nf` — both `cellprofiler` and
+`finalize_and_cellprofiler` processes now set:
+
+```bash
+export TMPDIR=$(pwd)
+```
+
+at the start of their script block, redirecting temp files to the Lustre work
+directory where there is ample space.
+
+### CellProfiler zip output (`cpr_no_zip`)
+
+CellProfiler 4.x outputs `.csv` files inside a `Data/` subdirectory (e.g.
+`features/{plate}/{row}/{col}/Data/Cells.csv`). The original zip command in
+`processes/cellprofiler.nf` looked for `*.txt` files, causing `zip` to exit
+with code 12 ("Nothing to do!").
+
+The fix changes the zip command to:
+
+```bash
+zip -j ./features/${well.relpath}/${well.plate}_${well.well}.zip \
+    ./features/${well.relpath}/Data/*.csv
+rm -rf ./features/${well.relpath}/Data
+```
+
+The `-j` flag (junk paths) places CSV files at the root level of the zip,
+matching the format expected by `tglowr::read_cellprofiler_fileset_b`.
+
+**Reading with tglow-r:** because the files are `.csv` rather than `.txt`, pass
+custom file patterns to `read_cellprofiler_fileset_b`:
+
+```r
+tglowr::read_cellprofiler_fileset_b(
+  prefix        = zip_file,
+  pat.cells     = ".*Cells\\.csv",
+  pat.img       = ".*Image\\.csv",
+  pat.exp       = ".*Experiment\\.csv",
+  pat.others    = "^([a-zA-Z][a-zA-Z_0-9]*)\\.csv$",
+  parent.col    = "Parent_Cells",
+  skip.children = c("Nuclei", "IdentifyERdebris", "MaskedERdebris", "Cytoplasm_ER"),
+  skip.orl      = TRUE,
+  fileset.id    = i,
+  add.global.id = TRUE
+)
+```
+
 ### CellProfiler wrapper (`puhti/cellprofiler-wrapper`)
 
 Several CellProfiler 4.2.8 runtime issues require a wrapper script to be

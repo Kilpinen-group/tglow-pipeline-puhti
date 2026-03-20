@@ -135,14 +135,14 @@ process finalize_and_cellprofiler {
             cmd += " --plugins-directory $params.cpr_plugins"
         }
         
-        // Zip output to save of lustre filecount
+        // Zip output to save on lustre filecount
         if (!params.cpr_no_zip) {
             cmd +=
             """
-            zip -r ./features/${well.relpath}/${well.plate}_${well.well}.zip ./features/${well.relpath}/*.txt
+            zip -j ./features/${well.relpath}/${well.plate}_${well.well}.zip ./features/${well.relpath}/Data/*.csv
 
             # Cleanup so only zip is staged
-            rm ./features/${well.relpath}/*.txt
+            rm -rf ./features/${well.relpath}/Data
             """
         }
 
@@ -203,14 +203,14 @@ process cellprofiler {
             cmd += " --plugins-directory $params.cpr_plugins"
         }
     
-        // Zip output to save of lustre filecount
+        // Zip output to save on lustre filecount
         if (!params.cpr_no_zip) {
             cmd +=
             """
-            zip -r ./features/${well.relpath}/${well.plate}_${well.well}.zip ./features/${well.relpath}/*.txt
+            zip -j ./features/${well.relpath}/${well.plate}_${well.well}.zip ./features/${well.relpath}/Data/*.csv
 
             # Cleanup so only zip is staged
-            rm ./features/${well.relpath}/*.txt
+            rm -rf ./features/${well.relpath}/Data
             """
         }
 
@@ -220,6 +220,6 @@ process cellprofiler {
         mkdir -p features/${well.relpath}
         cd features/${well.relpath}
         touch ${well.plate}_${well.well}.txt
-        """ 
-    
+        """
+
 }
